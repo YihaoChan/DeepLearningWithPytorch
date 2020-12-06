@@ -61,10 +61,10 @@ for epoch in range(epochs):
 
 # 测试
 model.eval()
-prediction = model(data).detach().numpy()
+prediction = model(data).detach().cpu().numpy()
 
 # 用真实数据和模型预测数据相比较，并计算误差
-error = (label.detach().numpy() - prediction) ** 2
+error = (label.detach().cpu().numpy() - prediction) ** 2
 
 print(error.mean())
 
@@ -75,9 +75,9 @@ restore_model = torch.load('model.pkl')
 print(restore_model.state_dict())
 
 # 真实数据散点图
-plt.scatter(data.detach().numpy(), label.detach().numpy(), c='r')
+plt.scatter(data.detach().cpu().numpy(), label.detach().cpu().numpy(), c='r')
 
 # 预测数据图
-plt.plot(data.detach().numpy(), prediction)
+plt.plot(data.detach().cpu().numpy(), prediction)
 
 plt.show()
