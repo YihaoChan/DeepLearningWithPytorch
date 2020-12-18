@@ -18,7 +18,7 @@ def to_img(x):
     """
     out = 0.5 * x + 1
     out = torch.clamp(out, 0, 1)  # torch.clamp: 把张量压缩到(a, b)区间之间
-    out = out.view(-1, 1, 28, 28)  # 和MNIST图片一样：黑白(单通道)，28 * 28
+    out = out.view(-1, 1, 28, 28)  # 和MNIST图片一样：黑白(单通道)，28 * 28，把64张小图拼在一张图中
     return out
 
 
@@ -142,10 +142,6 @@ def train(num_epochs, generator, discriminator, optimizer_gen, optimizer_dis, de
                 torch.save(optimizer_gen.state_dict(), './model/optimizer_gen.pkl')
                 torch.save(optimizer_dis.state_dict(), './model/optimizer_dis.pkl')
 
-        if epoch == 0:
-            real_images = to_img(img.cpu().data)
-            save_image(real_images, './img/real_images.png')
-
         fake_images = to_img(fake_data_gp.cpu().data)  # 生成器生成的假图片
         save_image(fake_images, './img/fake_images-{}.png'.format(epoch + 1))
 
@@ -166,10 +162,3 @@ if __name__ == '__main__':
     optim_d = optim.Adam(D.parameters())
 
     train(20, G, D, optim_g, optim_d, dev)
-
-    if os.path.exists('./model/generator.pkl'):
-        G.load_state_dict(torch.load('./model/generator.pkl'))
-        D.load_state_dict(torch.load('./model/discriminator.pkl'))
-
-        optim_g.load_state_dict(torch.load('./model/optimizer_gen.pkl'))
-        optim_d.load_state_dict(torch.load('./model/optimizer_dis.pkl'))
