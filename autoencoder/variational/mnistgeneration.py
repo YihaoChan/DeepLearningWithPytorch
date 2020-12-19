@@ -74,7 +74,7 @@ class VariationalAutoEncoder(nn.Module):
         # 参数重构，组合成潜在变量
         z = self.reparametrization(mu, sigma)
 
-        # 解码器：20维度 -> 784维度
+        # 解码器：20维度 -> 784维度 -> 原始图片大小
         out = self.decoder(z)
 
         return out, mu, sigma
