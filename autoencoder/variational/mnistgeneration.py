@@ -10,55 +10,71 @@ from torchvision.utils import save_image
 import os
 
 
+class Flatten(nn.Module):
+    def forward(self, input):
+        # [batch_size, 1, 28, 28] -> [batch_size, 784]
+        return input.view(input.size(0), 784)
+
+
+class UnFlatten(nn.Module):
+    def forward(self, input):
+        # [batch_size, 784] -> [batch_size, 1, 28, 28]
+        return input.view(input.size(0), 1, 28, 28)
+
+
 class VariationalAutoEncoder(nn.Module):
     def __init__(self):
         super(VariationalAutoEncoder, self).__init__()
-        self.fc1 = nn.Linear(784, 256)
+        self.encoder = nn.Sequential(
+            Flatten(),  # [batch_size, 1, 28, 28] -> [batch_size, 784]
+            nn.Linear(784, 256),  # [batch_size, 784] -> [batch_size, 256]
+            nn.ReLU()
+        )
 
-        self.fc2_mean = nn.Linear(256, 20)
-        self.fc2_std = nn.Linear(256, 20)
+        self.fc_mean = nn.Linear(256, 20)  # 均值：-> [batch_size, 20]
+        self.fc_std = nn.Linear(256, 20)  # 标准差：-> [batch_size, 20]
 
-        self.fc3 = nn.Linear(20, 256)
-        self.fc4 = nn.Linear(256, 784)
-
-        self.relu = nn.ReLU()
-
-    def encoder(self, x):
-        x_batch_size = x.size(0)
-
-        x = x.view(x_batch_size, 784)  # [batch_size, 1, 28, 28] -> [batch_size, 784]
-
-        x = self.fc1(x)  # [batch_size, 784] -> [batch_size, 256]
-
-        x = self.relu(x)
-
-        h_mean = self.fc2_mean(x)  # 均值：-> [batch_size, 20]
-        h_std = self.fc2_std(x)  # 标准差：-> [batch_size, 20]
-
-        return h_mean, h_std
+        self.decoder = nn.Sequential(
+            nn.Linear(20, 256),  # [batch_size, 20] -> [batch_size, 256]
+            nn.ReLU(),
+            nn.Linear(256, 784),  # [batch_size, 256] -> [batch_size, 784]
+            UnFlatten()  # [batch_size, 784] -> [batch_size, 1, 28, 28]
+        )
 
     def reparametrization(self, mu, sigma):
-        # 和采样自高斯分布进行圈乘，每个像素点的元素分别相乘，所以计算loss时要除以像素和batch
-        std = sigma * torch.randn_like(sigma)
+        """
+        对分布内的标准差与采样自高斯分布的变量进行圈乘，并与均值加和，计算潜在变量
+        code = mean + std * epsilon, 其中 epsilon ~ N(0, 1)
 
-        z = mu + std  # [batch_size, 20]
+        :param mu: 均值
+        :param sigma: 标准差
+        :return: 潜在变量
+        """
 
-        return z
+        # 采样自高斯分布，维度需与标准差一致
+        eps = torch.randn_like(sigma)
 
-    def decoder(self, z):
-        z = self.fc3(z)  # [batch_size, 20] -> [batch_size, 256]
-
-        z = self.relu(z)
-
-        z = self.fc4(z)  # [batch_size, 256] -> [batch_size, 784]
+        # 标准差和采样自高斯分布进行圈乘，每个像素点的元素分别相乘，所以后续计算loss时要除以像素和batch
+        z = mu + sigma * eps  # [batch_size, 20]
 
         return z
 
     def forward(self, x):
-        mu, sigma = self.encoder(x)
+        """
+        :return: out 用于计算重构图片和原始图片之间的误差
+        :return: mu, sigma 用于计算KL散度
+        """
 
+        # 编码器：输入图片 -> 展开成784维度-> 降维至256
+        h = self.encoder(x)
+
+        # bottleneck：256维度 -> 20维度的均值和标准差
+        mu, sigma = self.fc_mean(h), self.fc_std(h)
+
+        # 参数重构，组合成潜在变量
         z = self.reparametrization(mu, sigma)
 
+        # 解码器：20维度 -> 784维度
         out = self.decoder(z)
 
         return out, mu, sigma
@@ -88,11 +104,11 @@ def get_dataloader(train=True, batch_size=64):
 
 def cal_kl_divergence(mu, sigma, batch):
     """
-    :param batch: batch_size
+    当计算当前分布和高斯分布的KL散度时，计算公式为：½ * (σ^2 + μ^2 - log(σ^2) - 1)
     :param mu: 均值
     :param sigma: 标准差
-    :Description: 当计算当前分布和高斯分布的KL散度时，计算公式为：
-                  ½ * (σ^2 + μ^2 - log(σ^2) - 1)
+    :param batch: batch_size
+    :return: KL散度
     """
     return 0.5 * torch.sum(
         torch.pow(mu, 2) +
@@ -107,12 +123,9 @@ def train(net, num_epochs, batch_size, optimizer, device):
 
     criterion = nn.MSELoss()
 
-    train_dataloader = get_dataloader(train=True, batch_size=batch_size)
-
     for epoch in range(num_epochs):
-        for batch_idx, (data, _) in enumerate(train_dataloader):
-            num_img = data.size(0)
-            data = data.view(num_img, -1).to(device)
+        for batch_idx, (data, _) in enumerate(get_dataloader(train=True, batch_size=batch_size)):
+            data = data.to(device)
 
             output, mu, sigma = net(data)
             output = output.to(device)
@@ -131,7 +144,7 @@ def train(net, num_epochs, batch_size, optimizer, device):
                     epoch, batch_idx, loss.item()
                 ))
 
-        gen_img = output.cpu().data.view(-1, 1, 28, 28)  # 铺开成64张小图拼在一起，每一张1通道及28*28大小
+        gen_img = output.cpu().data  # 铺开成64张小图拼在一起，每一张1通道及28*28大小
         save_image(gen_img, './img/gen_img-{}.png'.format(epoch + 1))
 
 
